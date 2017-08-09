@@ -1,4 +1,4 @@
-var DEBUG = false,
+var DEBUG = true,
 	webpage = require('webpage'),
 	page = webpage.create(),
 	fs = require('fs'),
@@ -15,16 +15,31 @@ var DEBUG = false,
 	store = {
 		files: [],
 		paths: []
-	};
+	},
+	watchdog = 100;
 
 page.onConsoleMessage = function(msg, lineNum, sourceId) {
 	if (DEBUG)
 		console.log('CONSOLE: ' + msg + ' (from line #' + lineNum + ' in "' + sourceId + '")');
 };
 
-page.onError = function(msg) {
-	if (DEBUG)
-		console.log('ERROR: ' + msg);
+page.onError = function(msg, trace) {
+
+	if (!DEBUG) {
+		return;
+	}
+
+	var msgStack = ['ERROR: ' + msg];
+
+	if (trace && trace.length) {
+		msgStack.push('TRACE:');
+		trace.forEach(function(t) {
+			msgStack.push(' -> ' + t.file + ': ' + t.line + (t.function ? ' (in function "' + t.function+'")' : ''));
+		});
+	}
+
+	console.error(msgStack.join('\n'));
+
 };
 
 page.settings.loadImages = true;
@@ -114,13 +129,19 @@ function readCookie(callback) {
 
 function extract(tree, path, callback) {
 
+	//console.log("start extract " + tree.length);
+
+
 	if (tree.length === 0) {
 		callback();
 	}
 
 	store.paths.push(path);
 
+
 	var object = tree.pop();
+
+
 
 	//console.log(path, object.name, object.href);
 
@@ -133,9 +154,9 @@ function extract(tree, path, callback) {
 	}
 
 
-	//var page = webpage.create();
+
 	page.open(object.href, function(status) {
-		//console.log("\t" + status);
+
 		if (status == "success") {
 
 			var links = page.evaluate(function() {
@@ -163,8 +184,23 @@ function extract(tree, path, callback) {
 			extract(subTree, path + object.name.trim() + "/", function() {
 				extract(tree, path, callback);
 			});
+		} else {
+
+
+			if (watchdog-- > 0) {
+
+				tree.push(object);
+			} else {
+				console.log("WATCHDOG LIMIT REACHED");
+			}
+			setTimeout(function() {
+				console.log("RETRY")
+				extract(tree, path, callback);
+			}, 1000);
+
 		}
 	});
+
 
 }
 
